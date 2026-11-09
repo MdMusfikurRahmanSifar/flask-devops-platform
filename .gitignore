@@ -10,7 +10,10 @@
 # --- Kiro IDE (specs, settings, cache — local only) ---
 .kiro/
 
-# --- Project-local notes ---
+# --- AI workspace / project-local notes (never commit these) ---
+# Block all root-level .md files; README.md is explicitly allowed below
+/*.md
+!README.md
 AGENTS.md
 versions.md
 
