@@ -1,0 +1,48 @@
+﻿# -------------------------------------------------------
+# Tracked: app/, Dockerfile, docker-compose*.yml,
+#          scripts/, observability/, k8s/, terraform/,
+#          .github/workflows/, pytest.ini, README.md,
+#          .env.example, .gitignore
+#
+# Everything else stays local only.
+# -------------------------------------------------------
+
+# --- Kiro IDE (specs, settings, cache — local only) ---
+.kiro/
+
+# --- Project-local notes ---
+AGENTS.md
+versions.md
+
+# --- Python runtime artifacts ---
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+.hypothesis/
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Terraform state ---
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.tfplan
+crash.log
+
+# --- Kubernetes secrets ---
+k8s/base/secret.yaml
+!k8s/base/secret.example.yaml
+
+# --- OS ---
+.DS_Store
+Thumbs.db
