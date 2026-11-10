@@ -1,0 +1,10 @@
+.git
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.hypothesis
+**/tests/
+.env*
+.coverage
+htmlcov/
+.kiro/
