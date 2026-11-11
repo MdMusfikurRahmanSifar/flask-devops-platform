@@ -1,0 +1,34 @@
+# from repo root on the phase-3-script branch
+chmod +x scripts/system_health.sh
+
+# 1. shellcheck must be silent
+shellcheck scripts/system_health.sh
+# no output = pass
+
+# 2. Help
+./scripts/system_health.sh --help
+# prints usage, exits 0
+
+# 3. Healthy run
+./scripts/system_health.sh --log /tmp/health.log
+echo "exit=$?"
+# exit=0, one line printed, one line in /tmp/health.log
+
+# 4. JSON mode
+./scripts/system_health.sh --json --log /tmp/health.log | python -m json.tool
+# valid JSON with timestamp, status, cpu_percent, memory_percent, load_average, disk[], top_processes[], warnings[]
+
+# 5. Trigger a warning (disk threshold 1% = everything warns)
+./scripts/system_health.sh --disk 1 --log /tmp/health.log
+echo "exit=$?"
+# exit=1, [WARNING] Disk ... lines on stderr
+
+# 6. Trigger critical
+./scripts/system_health.sh --bogus 2>/dev/null
+echo "exit=$?"
+# exit=2
+
+# 7. Log rotation
+for i in {1..3}; do truncate -s 2M /tmp/health.log; ./scripts/system_health.sh --log /tmp/health.log --quiet; done
+ls /tmp/health.log*
+# rotated files appear; at most 5 rotated copies kept
