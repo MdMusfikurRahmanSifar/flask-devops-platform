@@ -1,0 +1,66 @@
+groups:
+  - name: devops-platform
+    interval: 30s
+    rules:
+      # 1. App instance down. Threshold: 1m
+      # Short enough to alert quickly, long enough to survive scrape jitter,
+      # Prometheus restarts, and rolling deploys (which take <30s).
+      - alert: AppInstanceDown
+        expr: up{job="app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "App instance is down"
+          description: "up{job=\"app\"} has been 0 for over 1 minute."
+
+      # 2. High 5xx error rate. Threshold: 5% over 5m.
+      # 5% is the standard SLO breach line; below this is noise, above this
+      # is user-visible degradation. 5m smooths short bursts.
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High 5xx error rate (>5%)"
+          description: "5xx rate is {{ $value | humanizePercentage }} over 5m."
+
+      # 3. Host disk usage above 80%. Threshold: 80% over 5m.
+      # 80% gives buffer to react before the disk fills and logs are dropped.
+      # Excludes tmpfs and lxcfs (ephemeral, irrelevant to capacity planning).
+      - alert: HostDiskUsageHigh
+        expr: |
+          (
+            node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs"}
+            /
+            node_filesystem_size_bytes{fstype!~"tmpfs|fuse.lxcfs"}
+          ) < 0.20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host disk usage >80% on {{ $labels.mountpoint }}"
+          description: "{{ $labels.mountpoint }} on {{ $labels.instance }} is at {{ $value | humanizePercentage }} free."
+
+      # 4. Container memory near limit. Threshold: 90% over 5m.
+      # 90% leaves 10% headroom so the OOM killer is not imminent; 5m avoids
+      # flapping from transient spikes (GC, request bursts).
+      - alert: ContainerMemoryNearLimit
+        expr: |
+          (
+            container_memory_usage_bytes{name=~".+"}
+            /
+            container_spec_memory_limit_bytes{name=~".+"}
+          ) > 0.90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} near memory limit"
+          description: "{{ $labels.name }} is at {{ $value | humanizePercentage }} of its memory limit."

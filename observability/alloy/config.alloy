@@ -1,0 +1,62 @@
+// Grafana Alloy — Docker service discovery + Loki log shipping.
+// Cardinality policy: only `level` is promoted from JSON to a Loki label.
+// `path`, `message`, `status`, `request_id` stay in the log body so we do not
+// explode the index.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_log_stream"]
+    target_label  = "stream"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.containers.rules
+  labels        = { job = "docker" }
+  forward_to    = [loki.process.parse.receiver]
+}
+
+loki.process "parse" {
+  forward_to = [loki.write.loki.receiver]
+
+  // Parse the app's structured JSON so `level` becomes a label.
+  stage.json {
+    expressions = {
+      level     = "level",
+      message   = "message",
+      timestamp = "timestamp",
+      path      = "path",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+}
+
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

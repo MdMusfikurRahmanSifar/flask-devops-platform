@@ -1,0 +1,18 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default'
+
+receivers:
+  # To route to Slack/Discord, replace this block with a webhook_configs
+  # entry pointing at your URL. Kept as a discard endpoint so the stack is
+  # healthy even without a real integration.
+  - name: 'default'
+    webhook_configs:
+      - url: 'http://127.0.0.1:9/'
+        send_resolved: false
