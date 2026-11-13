@@ -16,7 +16,6 @@ import sys
 import os
 from unittest.mock import patch
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -262,7 +261,7 @@ must result in http_requests_total delta of exactly N for the correct label set.
 Validates: Requirements US-3.2, US-3.5
 """
 
-from prometheus_client import CollectorRegistry, Counter as _Counter
+from prometheus_client import CollectorRegistry
 from app.metrics import record_metrics
 
 

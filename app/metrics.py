@@ -19,7 +19,6 @@ Requirements: US-3.2, US-3.3, US-3.4, US-3.5
 
 from __future__ import annotations
 
-import prometheus_client
 from prometheus_client import Counter, Histogram, CollectorRegistry
 
 # ---------------------------------------------------------------------------

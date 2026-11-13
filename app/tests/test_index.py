@@ -11,7 +11,6 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 from prometheus_client import CollectorRegistry
 
 from app.config import Config

@@ -111,7 +111,6 @@ def create_app(
     @app.after_request
     def _record_request_metrics(response):
         """Emit Prometheus metrics and a JSON log line after every request."""
-        cfg: Config = app.config["APP_CONFIG"]
         reg: CollectorRegistry = app.config["METRICS_REGISTRY"]
 
         duration = time.time() - getattr(g, "start_time", time.time())

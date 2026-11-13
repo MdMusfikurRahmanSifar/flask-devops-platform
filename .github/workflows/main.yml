@@ -1,0 +1,141 @@
+name: main
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  IMAGE_NAME: flask-devops-platform
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+  ECR_REPO: ${{ vars.ECR_REPO || 'flask-devops-platform' }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/requirements.txt
+      - run: pip install -r app/requirements.txt
+      - run: pytest app/tests/ --cov=app --cov-report=term-missing --cov-fail-under=80
+
+  build-push:
+    name: Build + push
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      tag_sha: ${{ steps.tag.outputs.sha_tag }}
+      tag_semver: ${{ steps.tag.outputs.semver_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Compute tags
+        id: tag
+        run: |
+          SHA_TAG="sha-${GITHUB_SHA::7}"
+          SEMVER=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$SEMVER" ]; then
+            SEMVER="v0.0.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "semver_tag=${SEMVER}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        if: vars.AWS_ENABLED == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        if: vars.AWS_ENABLED == 'true'
+        id: ecr
+        run: |
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          REGISTRY="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+      - name: Build multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ vars.AWS_ENABLED == 'true' }}
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ steps.tag.outputs.sha_tag }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ steps.tag.outputs.semver_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "Tags: ${{ steps.tag.outputs.sha_tag }} / ${{ steps.tag.outputs.semver_tag }}"
+          echo "Pushed: ${{ vars.AWS_ENABLED == 'true' }}"
+
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: build-push
+    if: vars.DEPLOY_ENABLED == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Capture previous image
+        id: prev
+        run: |
+          OUT=$(aws ssm send-command \
+            --instance-ids "${{ vars.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["docker inspect --format \"{{.Config.Image}}\" app 2>/dev/null || echo none"]' \
+            --query 'Command.CommandId' --output text)
+          aws ssm wait command-executed --command-id "$OUT" --instance-id "${{ vars.EC2_INSTANCE_ID }}"
+          PREV=$(aws ssm get-command-invocation --command-id "$OUT" --instance-id "${{ vars.EC2_INSTANCE_ID }}" --query 'StandardOutputContent' --output text | tr -d '\n')
+          echo "previous=${PREV}" >> "$GITHUB_OUTPUT"
+      - name: Deploy new image
+        id: deploy
+        run: |
+          IMG="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ needs.build-push.outputs.tag_sha }}"
+          OUT=$(aws ssm send-command \
+            --instance-ids "${{ vars.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"docker pull ${IMG}\",\"docker rm -f app || true\",\"docker run -d --name app --restart unless-stopped -p 8080:8080 -e PORT=8080 -e APP_VERSION=${{ needs.build-push.outputs.tag_sha }} ${IMG}\"]" \
+            --query 'Command.CommandId' --output text)
+          aws ssm wait command-executed --command-id "$OUT" --instance-id "${{ vars.EC2_INSTANCE_ID }}"
+      - name: Smoke test
+        run: |
+          PUB=$(aws ec2 describe-instances --instance-ids "${{ vars.EC2_INSTANCE_ID }}" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          for i in $(seq 1 30); do
+            curl -sf "http://${PUB}:8080/health" | grep -q '"status":"ok"' && exit 0
+            sleep 2
+          done
+          exit 1
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          PREV="${{ steps.prev.outputs.previous }}"
+          [ "$PREV" = "none" ] && exit 1
+          OUT=$(aws ssm send-command \
+            --instance-ids "${{ vars.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"docker rm -f app || true\",\"docker run -d --name app --restart unless-stopped -p 8080:8080 ${PREV}\"]" \
+            --query 'Command.CommandId' --output text)
+          aws ssm wait command-executed --command-id "$OUT" --instance-id "${{ vars.EC2_INSTANCE_ID }}"

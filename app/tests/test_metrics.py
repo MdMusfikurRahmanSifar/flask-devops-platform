@@ -34,7 +34,6 @@ def _make_client(app_version: str = "1.0.0"):
 def _get_metric_value(registry: CollectorRegistry, name: str, labels: dict) -> float:
     """Parse generate_latest output to find a specific metric line's value."""
     output = generate_latest(registry).decode()
-    label_str = ",".join(f'{k}="{v}"' for k, v in sorted(labels.items()))
     for line in output.splitlines():
         if line.startswith(f"{name}{{") and all(
             f'{k}="{v}"' in line for k, v in labels.items()
