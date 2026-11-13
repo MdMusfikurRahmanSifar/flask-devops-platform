@@ -70,6 +70,16 @@ jobs:
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$REGISTRY"
 
+
+      - name: Compute image tag
+        id: image_tag
+        run: |
+          if [ "${{ vars.AWS_ENABLED }}" = "true" ]; then
+            echo "tag=${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ env.IMAGE_NAME }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build multi-arch image
         uses: docker/build-push-action@v6
         with:
@@ -77,8 +87,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: ${{ vars.AWS_ENABLED == 'true' }}
           tags: |
-            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ steps.tag.outputs.sha_tag }}
-            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ steps.tag.outputs.semver_tag }}
+            ${{ steps.image_tag.outputs.tag }}:${{ steps.tag.outputs.sha_tag }}
+            ${{ steps.image_tag.outputs.tag }}:${{ steps.tag.outputs.semver_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
