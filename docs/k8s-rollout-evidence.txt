@@ -1,0 +1,38 @@
+Kubernetes Rolling Update and Rollback Evidence
+================================================
+Cluster: kind v1.29.2 (devops)
+Namespace: devops-app
+Deployment: app (2 replicas, maxSurge=1, maxUnavailable=0)
+
+--- BEFORE (v1.0.0) ---
+app-667fb549d7-jpzmq   1/1   Running   0   105s
+app-667fb549d7-vf4j7   1/1   Running   0   115s
+
+--- TRIGGER: kubectl set env deployment/app APP_VERSION=2.0.0 ---
+Waiting for deployment "app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "app" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "app" rollout to finish: 1 old replicas are pending termination...
+deployment "app" successfully rolled out
+
+--- AFTER (v2.0.0) ---
+app-566fd9b94b-sdvw4   1/1   Running   0   21s
+app-566fd9b94b-zp52w   1/1   Running   0   10s
+app-667fb549d7-jpzmq   0/1   Terminating   0   2m6s
+app-667fb549d7-vf4j7   1/1   Terminating   0   2m16s
+
+GET / → {"message": "Hello from DevOps Task!", "status": "running", "version": "2.0.0"}
+
+--- ROLLBACK: kubectl rollout undo deployment/app ---
+deployment.apps/app rolled back
+deployment "app" successfully rolled out
+
+--- AFTER ROLLBACK (v1.0.0) ---
+app-667fb549d7-44pc2   1/1   Running   0   11s
+app-667fb549d7-gmkwh   1/1   Running   0   21s
+
+GET / → {"message": "Hello from DevOps Task!", "status": "running", "version": "1.0.0"}
+
+--- FINAL STATE ---
+kubectl -n devops-app get pods -l app=flask-app   → 2/2 Running
+kubectl -n devops-app get hpa                     → TARGETS 1%/70%, MINPODS 2, MAXPODS 5
+kubectl -n devops-app top pods                    → ~1m CPU, ~60Mi memory per pod
