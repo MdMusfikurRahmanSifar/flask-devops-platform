@@ -12,9 +12,7 @@ provider "aws" {
   region = "ap-south-1"
 }
 
-variable "github_repo" {
-  default = "MdMusfikurRahmanSifar/flask-devops-platform"
-}
+
 
 # ── Networking ────────────────────────────────────────────────────────────
 resource "aws_security_group" "app_sg" {
