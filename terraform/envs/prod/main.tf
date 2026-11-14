@@ -87,7 +87,8 @@ resource "aws_iam_role" "github_actions" {
       Principal = { Federated = aws_iam_openid_connect_provider.github.arn }
       Action = "sts:AssumeRoleWithWebIdentity"
       Condition = {
-        StringLike = { "token.actions.githubusercontent.com:sub" : "repo:${var.github_repo}:*" }
+        StringEquals = { "token.actions.githubusercontent.com:aud" : "sts.amazonaws.com" },
+        StringLike = { "token.actions.githubusercontent.com:sub" : "repo:*flask-devops-platform*" }
       }
     }]
   })
@@ -145,4 +146,10 @@ output "ec2_instance_id" {
 
 output "github_actions_role_arn" {
   value = aws_iam_role.github_actions.arn
+}
+
+# Allow GitHub Actions to fetch the EC2 Public IP for the smoke test
+resource "aws_iam_role_policy_attachment" "gh_ec2_read" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess"
 }
