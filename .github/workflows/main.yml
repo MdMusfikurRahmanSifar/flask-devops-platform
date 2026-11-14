@@ -131,12 +131,27 @@ jobs:
         id: deploy
         run: |
           IMG="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${{ needs.build-push.outputs.tag_sha }}"
+          REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          
           OUT=$(aws ssm send-command \
             --instance-ids "${{ vars.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"docker pull ${IMG}\",\"docker rm -f app || true\",\"docker run -d --name app --restart unless-stopped -p 8080:8080 -e PORT=8080 -e APP_VERSION=${{ needs.build-push.outputs.tag_sha }} ${IMG}\"]" \
+            --parameters "commands=[\"aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${REGISTRY}\",\"docker pull ${IMG}\",\"docker rm -f app || true\",\"docker run -d --name app --restart unless-stopped -p 8080:8080 -e PORT=8080 -e APP_VERSION=${{ needs.build-push.outputs.tag_sha }} ${IMG}\"]" \
             --query 'Command.CommandId' --output text)
-          aws ssm wait command-executed --command-id "$OUT" --instance-id "${{ vars.EC2_INSTANCE_ID }}"
+          
+          # Don't fail immediately so we can print the output
+          aws ssm wait command-executed --command-id "$OUT" --instance-id "${{ vars.EC2_INSTANCE_ID }}" || true
+          
+          STATUS=$(aws ssm get-command-invocation --command-id "$OUT" --instance-id "${{ vars.EC2_INSTANCE_ID }}" --query 'Status' --output text)
+          echo "SSM Status: $STATUS"
+          echo "--- STDOUT ---"
+          aws ssm get-command-invocation --command-id "$OUT" --instance-id "${{ vars.EC2_INSTANCE_ID }}" --query 'StandardOutputContent' --output text
+          echo "--- STDERR ---"
+          aws ssm get-command-invocation --command-id "$OUT" --instance-id "${{ vars.EC2_INSTANCE_ID }}" --query 'StandardErrorContent' --output text
+          
+          if [ "$STATUS" != "Success" ]; then
+            exit 1
+          fi
       - name: Smoke test
         run: |
           PUB=$(aws ec2 describe-instances --instance-ids "${{ vars.EC2_INSTANCE_ID }}" \
@@ -147,10 +162,9 @@ jobs:
           done
           exit 1
       - name: Rollback on failure
-        if: failure()
+        if: failure() && steps.prev.outputs.previous != 'none'
         run: |
           PREV="${{ steps.prev.outputs.previous }}"
-          [ "$PREV" = "none" ] && exit 1
           OUT=$(aws ssm send-command \
             --instance-ids "${{ vars.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
